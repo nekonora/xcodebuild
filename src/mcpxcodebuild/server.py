@@ -1,3 +1,4 @@
+from mcp.server.lowlevel import Server
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
@@ -63,69 +64,72 @@ class Folder(BaseModel):
     """Parameters"""
     folder: Annotated[str, Field(description="The full path of the current folder that the iOS Xcode workspace/project sits")]
 
-async def serve() -> None:
-    server = Server("build")
+server = Server("build")
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return [
-            Tool(
-                name = "build",
-                description = "Build the iOS Xcode workspace/project in the folder",
-                inputSchema = Folder.model_json_schema(),
-            ),
-            Tool(
-                name="test",
-                description="Run test for the iOS Xcode workspace/project in the folder",
-                inputSchema=Folder.model_json_schema(),
-            )
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name = "build",
+            description = "Build the iOS Xcode workspace/project in the folder",
+            inputSchema = Folder.model_json_schema(),
+        ),
+        Tool(
+            name="test",
+            description="Run test for the iOS Xcode workspace/project in the folder",
+            inputSchema=Folder.model_json_schema(),
+        )
+    ]
+@server.call_tool()
+async def call_tool(name, arguments: dict) -> list[TextContent]:
+    try:
+        args = Folder(**arguments)
+    except ValueError as e:
+        raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+    os.chdir(args.folder)
+    xcode_project_path = find_xcode_project()
+    project_name = os.path.basename(xcode_project_path)
+    project_type = ""
+    if xcode_project_path.endswith(".xcworkspace"):
+        project_type = "-workspace"
+    else:
+        project_type = "-project"
+
+    scheme = find_scheme(project_type, project_name)
+    destination = find_available_simulator()
+    command = ["xcodebuild",
+               project_type,
+               project_name,
+               "-scheme",
+               scheme,
+               "-destination",
+               destination]
+    if name == "test":
+        command.append("test")
+
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout
+    
+    lines = result.decode("utf-8").splitlines()
+    error_lines = [line for line in lines if "error:" in line.lower()]
+    error_message = "\n".join(error_lines)
+    if not error_message:
+        error_message = "Successful"
+    return [
+        TextContent(type="text", text=f"Command: {' '.join(command)}"),
+        TextContent(type="text", text=f"{error_message}")
         ]
 
-    @server.call_tool()
-    async def call_tool(name, arguments: dict) -> list[TextContent]:
-        try:
-            args = Folder(**arguments)
-        except ValueError as e:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
-        os.chdir(args.folder)
-        xcode_project_path = find_xcode_project()
-
-        project_type = ""
-        project_name = ""
-        if xcode_project_path.endswith(".xcworkspace"):
-            project_type = "-workspace"
-            project_name = os.path.basename(xcode_project_path)
-        else:
-            project_type = "-project"
-            project_name = os.path.basename(xcode_project_path)
-    
-        scheme = find_scheme(project_type, project_name)
-        destination = find_available_simulator()
-        command = ["xcodebuild",
-                   project_type,
-                   project_name,
-                   "-scheme",
-                   scheme,
-                   "-destination",
-                   destination]
-        if name == "build":
-            result = subprocess.run(command, stdout=-1, check=False).stdout
-        else:
-            result = subprocess.run(command + ["test"], stdout=subprocess.PIPE, check=False).stdout
-        
-        lines = result.decode("utf-8").splitlines()
-        error_lines = [line for line in lines if "error:" in line.lower()]
-        error_message = "\n".join(error_lines)
-        if not error_message:
-            error_message = "Successful"
-
-        return [TextContent(type="text", text=f"{error_message}")]
-
+async def run():
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, options, raise_exceptions=True)
+        await server.run(
+            read_stream,
+            write_stream,
+            options,
+            raise_exceptions=True,
+        )
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(serve())
+    asyncio.run(run())
