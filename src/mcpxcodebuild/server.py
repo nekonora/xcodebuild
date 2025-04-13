@@ -110,7 +110,7 @@ async def call_tool(name, arguments: dict) -> list[TextContent]:
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout
     
     lines = result.decode("utf-8").splitlines()
-    error_lines = [line for line in lines if "error:" in line.lower()]
+    error_lines = [line for line in lines if "error:" or "warning:" in line.lower()]
     error_message = "\n".join(error_lines)
     if not error_message:
         error_message = "Successful"
