@@ -50,7 +50,7 @@ python -m  mcpxcodebuild
 
 ## Configuration
 
-### Configure for Claude.app
+### Configure for Claude Desktop App
 
 Add to your Claude settings:
 
@@ -75,6 +75,63 @@ Add to your Claude settings:
   "mcpxcodebuild": {
     "command": "python",
     "args": ["-m", "mcpxcodebuild"]
+  }
+}
+```
+</details>
+
+### Configure for Claude Code
+
+Add to your Claude Code configuration by editing `~/.config/claude/claude_desktop_config.json`:
+
+<details>
+<summary>Local development setup</summary>
+
+For local development, first install the package locally:
+```bash
+uv pip install -e .
+```
+
+Then add to your config:
+```json
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "command": "python",
+      "args": ["-m", "mcpxcodebuild"]
+    }
+  }
+}
+```
+
+Restart Claude Code for the changes to take effect.
+</details>
+
+<details>
+<summary>Using uvx</summary>
+
+```json
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "command": "uvx",
+      "args": ["mcpxcodebuild"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary>Using pip installation</summary>
+
+```json
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "command": "python",
+      "args": ["-m", "mcpxcodebuild"]
+    }
   }
 }
 ```
@@ -131,6 +188,11 @@ Build your project using a specific scheme:
 Build my iOS project in /path/to/my/ios/project using the MyApp scheme
 ```
 
+**Example with scheme name parameter:**
+```
+Build the MyApp scheme in /Users/john/MyiOSApp
+```
+
 ### Running Tests
 
 Run tests for your project (with optional scheme selection):
@@ -162,6 +224,14 @@ Build my iOS project in /path/to/my/ios/project and show only warnings
 **Filter by specific string:**
 ```
 Build my iOS project in /path/to/my/ios/project and show only lines containing "MyClassName"
+```
+
+**Example filtering patterns:**
+```
+Build with errors only: Build /Users/john/MyiOSApp with errors_only filter
+Build with warnings only: Build /Users/john/MyiOSApp with warnings_only filter  
+Build with string match: Build /Users/john/MyiOSApp filtering for "error:" text
+Build with custom filter: Build /Users/john/MyiOSApp and show lines containing "deprecated"
 ```
 
 **Show all output (default):**
