@@ -92,19 +92,43 @@ For local development, first install the package locally:
 uv pip install -e .
 ```
 
+Create a shell script wrapper (recommended approach):
+```bash
+#!/bin/bash
+cd /path/to/your/project
+exec /path/to/uv run python -m mcpxcodebuild
+```
+
+Make it executable:
+```bash
+chmod +x /path/to/your/project/run_server.sh
+```
+
 Then add to your config:
 ```json
 {
   "mcpServers": {
     "xcodebuild": {
-      "command": "python",
-      "args": ["-m", "mcpxcodebuild"]
+      "command": "/path/to/your/project/run_server.sh"
     }
   }
 }
 ```
 
 Restart Claude Code for the changes to take effect.
+
+**Alternative approach (may not work on all systems):**
+```json
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "command": "/path/to/uv",
+      "args": ["run", "python", "-m", "mcpxcodebuild"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
 </details>
 
 <details>

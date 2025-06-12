@@ -160,7 +160,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_default_scheme",
             description="Show the currently configured default scheme",
-            inputSchema={},
+            inputSchema={"type": "object"},
         )
     ]
 @server.call_tool()
