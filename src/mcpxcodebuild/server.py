@@ -9,6 +9,7 @@ from mcp.types import (
 from typing import Annotated, Optional
 from pydantic import Field
 from pydantic import BaseModel
+from enum import Enum
 import subprocess
 import os
 import json
@@ -16,6 +17,12 @@ from mcp.shared.exceptions import McpError
 
 # Global default scheme configuration
 default_scheme: Optional[str] = None
+
+class OutputFilter(str, Enum):
+    ALL = "all"
+    ERRORS_ONLY = "errors_only"
+    WARNINGS_ONLY = "warnings_only"
+    STRING_MATCH = "string_match"
 
 def find_xcode_project():
     for root, dirs, files in os.walk("."):
@@ -66,6 +73,39 @@ def find_scheme(project_type: str, project_name: str, requested_scheme: Optional
     else:
         return ""
 
+def filter_build_output(lines: list[str], output_filter: OutputFilter, filter_string: Optional[str] = None) -> str:
+    """Filter xcodebuild output based on the specified filter type"""
+    
+    if output_filter == OutputFilter.ALL:
+        # Return all output
+        filtered_lines = lines
+    elif output_filter == OutputFilter.ERRORS_ONLY:
+        # Only lines containing "error:"
+        filtered_lines = [line for line in lines if "error:" in line.lower()]
+    elif output_filter == OutputFilter.WARNINGS_ONLY:
+        # Only lines containing "warning:"
+        filtered_lines = [line for line in lines if "warning:" in line.lower()]
+    elif output_filter == OutputFilter.STRING_MATCH:
+        # Lines containing the specified string
+        if not filter_string:
+            raise ValueError("filter_string is required when output_filter is 'string_match'")
+        filtered_lines = [line for line in lines if filter_string.lower() in line.lower()]
+    else:
+        # Default to all if unknown filter
+        filtered_lines = lines
+    
+    if not filtered_lines:
+        if output_filter == OutputFilter.ERRORS_ONLY:
+            return "No errors found"
+        elif output_filter == OutputFilter.WARNINGS_ONLY:
+            return "No warnings found"
+        elif output_filter == OutputFilter.STRING_MATCH:
+            return f"No lines matching '{filter_string}' found"
+        else:
+            return "No output"
+    
+    return "\n".join(filtered_lines)
+
 def find_available_simulator() -> str:
     devices_result = subprocess.run(["xcrun", "simctl", "list", "devices", "--json"], stdout=subprocess.PIPE, check=False)
     devices_json = json.loads(devices_result.stdout.decode("utf-8"))
@@ -80,6 +120,8 @@ class BuildParams(BaseModel):
     """Parameters"""
     folder: Annotated[str, Field(description="The full path of the current folder that the iOS Xcode workspace/project sits")]
     scheme: Annotated[Optional[str], Field(description="The specific scheme to build (optional - if not provided, first available scheme will be used)", default=None)]
+    output_filter: Annotated[OutputFilter, Field(description="Filter output: 'all' (default), 'errors_only', 'warnings_only', or 'string_match'", default=OutputFilter.ALL)]
+    filter_string: Annotated[Optional[str], Field(description="String to match when output_filter is 'string_match' (required for string_match filter)", default=None)]
 
 class Folder(BaseModel):
     """Parameters"""
@@ -176,6 +218,11 @@ async def call_tool(name, arguments: dict) -> list[TextContent]:
         args = BuildParams(**arguments)
     except ValueError as e:
         raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+    
+    # Validate filter_string requirement for string_match filter
+    if args.output_filter == OutputFilter.STRING_MATCH and not args.filter_string:
+        raise McpError(ErrorData(code=INVALID_PARAMS, message="filter_string is required when output_filter is 'string_match'"))
+    
     os.chdir(args.folder)
     xcode_project_path = find_xcode_project()
     if not xcode_project_path:
@@ -202,13 +249,11 @@ async def call_tool(name, arguments: dict) -> list[TextContent]:
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout
     
     lines = result.decode("utf-8").splitlines()
-    error_lines = [line for line in lines if "error:" or "warning:" in line.lower()]
-    error_message = "\n".join(error_lines)
-    if not error_message:
-        error_message = "Successful"
+    filtered_output = filter_build_output(lines, args.output_filter, args.filter_string)
+    
     return [
         TextContent(type="text", text=f"Command: {' '.join(command)}"),
-        TextContent(type="text", text=f"{error_message}")
+        TextContent(type="text", text=filtered_output)
         ]
 
 

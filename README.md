@@ -11,9 +11,13 @@ A Model Context Protocol server that builds iOS workspace/project that enables s
 - `build` - Build iOS Xcode workspace/project
     - `folder` (string, required): The full path of the current folder that the iOS Xcode workspace/project sits
     - `scheme` (string, optional): The specific scheme to build (if not provided, first available scheme will be used)
+    - `output_filter` (string, optional): Filter output - 'all' (default), 'errors_only', 'warnings_only', or 'string_match'
+    - `filter_string` (string, optional): String to match when output_filter is 'string_match' (required for string_match filter)
 - `test` - Run test for iOS Xcode workspace/project
     - `folder` (string, required): The full path of the current folder that the iOS Xcode workspace/project sits
     - `scheme` (string, optional): The specific scheme to build (if not provided, first available scheme will be used)
+    - `output_filter` (string, optional): Filter output - 'all' (default), 'errors_only', 'warnings_only', or 'string_match'
+    - `filter_string` (string, optional): String to match when output_filter is 'string_match' (required for string_match filter)
 - `list_schemes` - List all available schemes for the iOS Xcode workspace/project
     - `folder` (string, required): The full path of the current folder that the iOS Xcode workspace/project sits
 - `set_default_scheme` - Set a default scheme to use for future builds and tests (avoids having to specify scheme each time)
@@ -141,6 +145,30 @@ or with a specific scheme:
 Run tests for my iOS project in /path/to/my/ios/project using the MyAppTests scheme
 ```
 
+### Output Filtering
+
+Filter the build/test output to focus on specific information:
+
+**Show only errors:**
+```
+Build my iOS project in /path/to/my/ios/project and show only errors
+```
+
+**Show only warnings:**
+```
+Build my iOS project in /path/to/my/ios/project and show only warnings
+```
+
+**Filter by specific string:**
+```
+Build my iOS project in /path/to/my/ios/project and show only lines containing "MyClassName"
+```
+
+**Show all output (default):**
+```
+Build my iOS project in /path/to/my/ios/project with full output
+```
+
 ### Workflow Examples
 
 **Recommended workflow with default scheme:**
@@ -165,8 +193,18 @@ Run tests for my iOS project in /path/to/my/ios/project using the MyAppTests sch
 3. Run tests using the MyAppTests scheme (overrides default for this one command)
 ```
 
+**Focused debugging workflow:**
+```
+1. Build the project and show only errors
+2. If errors found, fix them and rebuild
+3. Build again and show only warnings
+4. Run tests and show only lines containing "failed"
+```
+
 **Error handling:**
-If you specify an invalid scheme, Claude Code will provide a helpful error message listing all available schemes.
+- If you specify an invalid scheme, Claude Code will provide a helpful error message listing all available schemes
+- If you use string_match filter without providing a filter_string, you'll get a clear error message
+- If no matches are found for your filter, you'll get appropriate "No X found" messages
 
 ## License
 
