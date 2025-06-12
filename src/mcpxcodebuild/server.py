@@ -1,20 +1,21 @@
-from mcp.server.lowlevel import Server
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     ErrorData,
     TextContent,
     Tool,
-    Annotations,
-    Field,
-    Annotated,
     INVALID_PARAMS,
 )
+from typing import Annotated, Optional
+from pydantic import Field
 from pydantic import BaseModel
 import subprocess
-import os, json
+import os
+import json
 from mcp.shared.exceptions import McpError
 
+# Global default scheme configuration
+default_scheme: Optional[str] = None
 
 def find_xcode_project():
     for root, dirs, files in os.walk("."):
@@ -24,7 +25,7 @@ def find_xcode_project():
                 return os.path.join(root, dir)
     return None
 
-def find_scheme(project_type: str, project_name: str) -> str:
+def get_available_schemes(project_type: str, project_name: str) -> list[str]:
     schemes_result = subprocess.run(["xcodebuild",
                                     "-list",
                                     project_type,
@@ -45,8 +46,23 @@ def find_scheme(project_type: str, project_name: str) -> str:
             if scheme:
                 schemes.append(scheme)
     
-    if schemes:
-        return schemes[0]
+    return schemes
+
+def find_scheme(project_type: str, project_name: str, requested_scheme: Optional[str] = None) -> str:
+    global default_scheme
+    available_schemes = get_available_schemes(project_type, project_name)
+    
+    # Priority: requested_scheme > default_scheme > first available
+    scheme_to_use = requested_scheme or default_scheme
+    
+    if scheme_to_use:
+        if scheme_to_use in available_schemes:
+            return scheme_to_use
+        else:
+            raise ValueError(f"Scheme '{scheme_to_use}' not found. Available schemes: {', '.join(available_schemes)}")
+    
+    if available_schemes:
+        return available_schemes[0]
     else:
         return ""
 
@@ -60,9 +76,19 @@ def find_available_simulator() -> str:
                 if device["isAvailable"]:
                     return f'platform=iOS Simulator,name={device["name"]},OS={runtime_id.split(".")[-1].replace("iOS-", "").replace("-", ".")}'
     return ""
+class BuildParams(BaseModel):
+    """Parameters"""
+    folder: Annotated[str, Field(description="The full path of the current folder that the iOS Xcode workspace/project sits")]
+    scheme: Annotated[Optional[str], Field(description="The specific scheme to build (optional - if not provided, first available scheme will be used)", default=None)]
+
 class Folder(BaseModel):
     """Parameters"""
     folder: Annotated[str, Field(description="The full path of the current folder that the iOS Xcode workspace/project sits")]
+
+class SchemeConfig(BaseModel):
+    """Parameters for setting default scheme"""
+    folder: Annotated[str, Field(description="The full path of the current folder that the iOS Xcode workspace/project sits")]
+    scheme: Annotated[str, Field(description="The scheme to set as default for future builds/tests")]
 
 server = Server("build")
 
@@ -72,30 +98,96 @@ async def list_tools() -> list[Tool]:
         Tool(
             name = "build",
             description = "Build the iOS Xcode workspace/project in the folder",
-            inputSchema = Folder.model_json_schema(),
+            inputSchema = BuildParams.model_json_schema(),
         ),
         Tool(
             name="test",
             description="Run test for the iOS Xcode workspace/project in the folder",
+            inputSchema=BuildParams.model_json_schema(),
+        ),
+        Tool(
+            name="list_schemes",
+            description="List all available schemes for the iOS Xcode workspace/project in the folder",
             inputSchema=Folder.model_json_schema(),
+        ),
+        Tool(
+            name="set_default_scheme",
+            description="Set a default scheme to use for future builds and tests (avoids having to specify scheme each time)",
+            inputSchema=SchemeConfig.model_json_schema(),
+        ),
+        Tool(
+            name="get_default_scheme",
+            description="Show the currently configured default scheme",
+            inputSchema={},
         )
     ]
 @server.call_tool()
 async def call_tool(name, arguments: dict) -> list[TextContent]:
+    global default_scheme
+    
+    if name == "set_default_scheme":
+        try:
+            args = SchemeConfig(**arguments)
+        except ValueError as e:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+        os.chdir(args.folder)
+        xcode_project_path = find_xcode_project()
+        if not xcode_project_path:
+            return [TextContent(type="text", text="No Xcode project found in the specified folder")]
+        
+        project_name = os.path.basename(xcode_project_path)
+        project_type = "-workspace" if xcode_project_path.endswith(".xcworkspace") else "-project"
+        
+        # Validate that the scheme exists
+        available_schemes = get_available_schemes(project_type, project_name)
+        if args.scheme not in available_schemes:
+            return [TextContent(type="text", text=f"Scheme '{args.scheme}' not found. Available schemes: {', '.join(available_schemes)}")]
+        
+        # Set the default scheme
+        default_scheme = args.scheme
+        return [TextContent(type="text", text=f"Default scheme set to '{args.scheme}'. Future builds and tests will use this scheme unless explicitly overridden.")]
+    
+    if name == "get_default_scheme":
+        if default_scheme:
+            return [TextContent(type="text", text=f"Current default scheme: '{default_scheme}'")]
+        else:
+            return [TextContent(type="text", text="No default scheme configured. Builds will use the first available scheme.")]
+    
+    if name == "list_schemes":
+        try:
+            args = Folder(**arguments)
+        except ValueError as e:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+        os.chdir(args.folder)
+        xcode_project_path = find_xcode_project()
+        if not xcode_project_path:
+            return [TextContent(type="text", text="No Xcode project found in the specified folder")]
+        
+        project_name = os.path.basename(xcode_project_path)
+        project_type = "-workspace" if xcode_project_path.endswith(".xcworkspace") else "-project"
+        
+        schemes = get_available_schemes(project_type, project_name)
+        if schemes:
+            return [TextContent(type="text", text="Available schemes:\n" + "\n".join(f"- {scheme}" for scheme in schemes))]
+        else:
+            return [TextContent(type="text", text="No schemes found")]
+    
     try:
-        args = Folder(**arguments)
+        args = BuildParams(**arguments)
     except ValueError as e:
         raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
     os.chdir(args.folder)
     xcode_project_path = find_xcode_project()
+    if not xcode_project_path:
+        return [TextContent(type="text", text="No Xcode project found in the specified folder")]
+    
     project_name = os.path.basename(xcode_project_path)
-    project_type = ""
-    if xcode_project_path.endswith(".xcworkspace"):
-        project_type = "-workspace"
-    else:
-        project_type = "-project"
+    project_type = "-workspace" if xcode_project_path.endswith(".xcworkspace") else "-project"
 
-    scheme = find_scheme(project_type, project_name)
+    try:
+        scheme = find_scheme(project_type, project_name, args.scheme)
+    except ValueError as e:
+        raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
     destination = find_available_simulator()
     command = ["xcodebuild",
                project_type,
