@@ -114,7 +114,10 @@ def find_available_simulator() -> str:
         if "iOS" in runtime_id:
             for device in devices:
                 if device["isAvailable"]:
-                    return f'platform=iOS Simulator,name={device["name"]},OS={runtime_id.split(".")[-1].replace("iOS-", "").replace("-", ".")}'
+                    # Extract the exact OS version from the runtime ID
+                    # Format: com.apple.CoreSimulator.SimRuntime.iOS-18-3-1 -> 18.3.1
+                    ios_version = runtime_id.split("iOS-")[-1].replace("-", ".")
+                    return f'platform=iOS Simulator,name={device["name"]},OS={ios_version}'
     return ""
 class BuildParams(BaseModel):
     """Parameters"""
@@ -246,13 +249,21 @@ async def call_tool(name, arguments: dict) -> list[TextContent]:
     if name == "test":
         command.append("test")
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     
-    lines = result.decode("utf-8").splitlines()
-    filtered_output = filter_build_output(lines, args.output_filter, args.filter_string)
+    # Combine stdout and stderr for complete output
+    stdout_lines = result.stdout.decode("utf-8").splitlines()
+    stderr_lines = result.stderr.decode("utf-8").splitlines()
+    all_lines = stdout_lines + stderr_lines
+    
+    filtered_output = filter_build_output(all_lines, args.output_filter, args.filter_string)
+    
+    # Include build status information
+    status_text = f"Build {'succeeded' if result.returncode == 0 else 'failed'} (exit code: {result.returncode})"
     
     return [
         TextContent(type="text", text=f"Command: {' '.join(command)}"),
+        TextContent(type="text", text=status_text),
         TextContent(type="text", text=filtered_output)
         ]
 
