@@ -119,10 +119,49 @@ def find_available_simulator() -> str:
                     ios_version = runtime_id.split("iOS-")[-1].replace("-", ".")
                     return f'platform=iOS Simulator,name={device["name"]},OS={ios_version}'
     return ""
+
+def build_destination(simulator_name: Optional[str] = None, ios_version: Optional[str] = None) -> str:
+    """Build the destination string for xcodebuild command"""
+    if simulator_name and ios_version:
+        # Use provided simulator name and iOS version
+        return f'platform=iOS Simulator,name={simulator_name},OS={ios_version}'
+    elif simulator_name or ios_version:
+        # If only one is provided, we need to find a matching simulator
+        devices_result = subprocess.run(["xcrun", "simctl", "list", "devices", "--json"], stdout=subprocess.PIPE, check=False)
+        devices_json = json.loads(devices_result.stdout.decode("utf-8"))
+        
+        for runtime_id, devices in devices_json["devices"].items():
+            if "iOS" in runtime_id:
+                runtime_ios_version = runtime_id.split("iOS-")[-1].replace("-", ".")
+                
+                # Skip if iOS version is specified but doesn't match
+                if ios_version and runtime_ios_version != ios_version:
+                    continue
+                    
+                for device in devices:
+                    if device["isAvailable"]:
+                        # Skip if simulator name is specified but doesn't match
+                        if simulator_name and device["name"] != simulator_name:
+                            continue
+                        
+                        return f'platform=iOS Simulator,name={device["name"]},OS={runtime_ios_version}'
+        
+        # If no matching simulator found, raise an error
+        criteria = []
+        if simulator_name:
+            criteria.append(f"name={simulator_name}")
+        if ios_version:
+            criteria.append(f"OS={ios_version}")
+        raise ValueError(f"No available simulator found matching criteria: {', '.join(criteria)}")
+    else:
+        # Use auto-detection (existing behavior)
+        return find_available_simulator()
 class BuildParams(BaseModel):
     """Parameters"""
     folder: Annotated[str, Field(description="The full path of the current folder that the iOS Xcode workspace/project sits")]
     scheme: Annotated[Optional[str], Field(description="The specific scheme to build (optional - if not provided, first available scheme will be used)", default=None)]
+    simulator_name: Annotated[Optional[str], Field(description="The iOS simulator name to use (e.g., 'iPhone 16', 'iPad Pro') - if not provided, first available simulator will be used", default=None)]
+    ios_version: Annotated[Optional[str], Field(description="The iOS version to use (e.g., '18.3.1', '17.5') - if not provided, version from first available simulator will be used", default=None)]
     output_filter: Annotated[OutputFilter, Field(description="Filter output: 'all' (default), 'errors_only', 'warnings_only', or 'string_match'", default=OutputFilter.ALL)]
     filter_string: Annotated[Optional[str], Field(description="String to match when output_filter is 'string_match' (required for string_match filter)", default=None)]
 
@@ -236,9 +275,9 @@ async def call_tool(name, arguments: dict) -> list[TextContent]:
 
     try:
         scheme = find_scheme(project_type, project_name, args.scheme)
+        destination = build_destination(args.simulator_name, args.ios_version)
     except ValueError as e:
         raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
-    destination = find_available_simulator()
     command = ["xcodebuild",
                project_type,
                project_name,
