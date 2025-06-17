@@ -22,6 +22,7 @@ class OutputFilter(str, Enum):
     ALL = "all"
     ERRORS_ONLY = "errors_only"
     WARNINGS_ONLY = "warnings_only"
+    ERRORS_AND_WARNINGS = "errors_and_warnings"
     STRING_MATCH = "string_match"
 
 def find_xcode_project():
@@ -77,28 +78,41 @@ def filter_build_output(lines: list[str], output_filter: OutputFilter, filter_st
     """Filter xcodebuild output based on the specified filter type"""
     
     if output_filter == OutputFilter.ALL:
-        # Return all output
-        filtered_lines = lines
+        # Return all output but with size limits to prevent overwhelming AI agents
+        MAX_LINES = 200
+        if len(lines) > MAX_LINES:
+            summary_lines = [
+                f"[Output truncated - showing last {MAX_LINES} lines of {len(lines)} total lines]",
+                ""
+            ]
+            filtered_lines = summary_lines + lines[-MAX_LINES:]
+        else:
+            filtered_lines = lines
     elif output_filter == OutputFilter.ERRORS_ONLY:
         # Only lines containing "error:"
         filtered_lines = [line for line in lines if "error:" in line.lower()]
     elif output_filter == OutputFilter.WARNINGS_ONLY:
         # Only lines containing "warning:"
         filtered_lines = [line for line in lines if "warning:" in line.lower()]
+    elif output_filter == OutputFilter.ERRORS_AND_WARNINGS:
+        # Lines containing either "error:" or "warning:"
+        filtered_lines = [line for line in lines if "error:" in line.lower() or "warning:" in line.lower()]
     elif output_filter == OutputFilter.STRING_MATCH:
         # Lines containing the specified string
         if not filter_string:
             raise ValueError("filter_string is required when output_filter is 'string_match'")
         filtered_lines = [line for line in lines if filter_string.lower() in line.lower()]
     else:
-        # Default to all if unknown filter
-        filtered_lines = lines
+        # Default to errors and warnings if unknown filter
+        filtered_lines = [line for line in lines if "error:" in line.lower() or "warning:" in line.lower()]
     
     if not filtered_lines:
         if output_filter == OutputFilter.ERRORS_ONLY:
             return "No errors found"
         elif output_filter == OutputFilter.WARNINGS_ONLY:
             return "No warnings found"
+        elif output_filter == OutputFilter.ERRORS_AND_WARNINGS:
+            return "No errors or warnings found"
         elif output_filter == OutputFilter.STRING_MATCH:
             return f"No lines matching '{filter_string}' found"
         else:
@@ -162,7 +176,7 @@ class BuildParams(BaseModel):
     scheme: Annotated[Optional[str], Field(description="The specific scheme to build (optional - if not provided, first available scheme will be used)", default=None)]
     simulator_name: Annotated[Optional[str], Field(description="The iOS simulator name to use (e.g., 'iPhone 16', 'iPad Pro') - if not provided, first available simulator will be used", default=None)]
     ios_version: Annotated[Optional[str], Field(description="The iOS version to use (e.g., '18.3.1', '17.5') - if not provided, version from first available simulator will be used", default=None)]
-    output_filter: Annotated[OutputFilter, Field(description="Filter output: 'all' (default), 'errors_only', 'warnings_only', or 'string_match'", default=OutputFilter.ALL)]
+    output_filter: Annotated[OutputFilter, Field(description="Filter output: 'all' (limited to last 200 lines), 'errors_only', 'warnings_only', 'errors_and_warnings' (recommended for AI agents), or 'string_match'", default=OutputFilter.ALL)]
     filter_string: Annotated[Optional[str], Field(description="String to match when output_filter is 'string_match' (required for string_match filter)", default=None)]
 
 class Folder(BaseModel):
